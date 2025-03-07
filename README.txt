@@ -1,4 +1,4 @@
-Advanced Market Research Tool (Using GPT-4o-mini with Memory)
+ Market Research Tool (Using GPT-4o-mini with Memory)
 =============================================================
 
 This tool performs market research on a user-provided topic (e.g., "fintech") or company, leveraging CrewAI, GPT-4o-mini, and web scraping/search tools. It generates a detailed summary with trends, leaders, financial insights, and more. This README guides you—whether beginner or advanced—through setting up and running the tool on macOS, Windows, Linux, or online terminals.
