@@ -9,6 +9,13 @@ from datetime import datetime
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Access API key from Streamlit secrets
+try:
+    openai.api_key = st.secrets["OPENAI_API_KEY"]
+except Exception as e:
+    st.error(f"Error accessing OpenAI API key from secrets: {str(e)}")
+    st.error("Please add your OpenAI API key to the app's secrets in the Streamlit Cloud dashboard.")
+
 # Initialize session state
 if "messages" not in st.session_state:
     st.session_state.messages = []
@@ -28,17 +35,39 @@ with st.sidebar:
     st.title("Market Research AI")
     st.subheader("Settings")
     
-    # API Key input
-    api_key = st.text_input("OpenAI API Key", type="password")
-    if api_key:
-        openai.api_key = api_key
-    
     # Research depth
     research_depth = st.select_slider(
         "Research Depth",
         options=["Basic", "Standard", "Detailed"],
         value="Standard",
         help="Control the depth of research (affects processing time)"
+    )
+    
+    # Geographic focus
+    geographic_options = [
+        "Global", "North America", "Europe", "Asia-Pacific", 
+        "Latin America", "Middle East & Africa", "United States", 
+        "China", "India", "European Union"
+    ]
+    geographic_focus = st.selectbox(
+        "Geographic Focus",
+        options=geographic_options,
+        index=0,
+        help="Select the geographic region to focus research on"
+    )
+    
+    # Time period
+    time_period_options = [
+        "Current (Last 6 months)", 
+        "Recent (Last 1-2 years)", 
+        "Medium-term (Last 3-5 years)",
+        "Long-term (Last decade)"
+    ]
+    time_period = st.selectbox(
+        "Time Period",
+        options=time_period_options,
+        index=1,
+        help="Select the time period to focus research on"
     )
     
     # Quick research topics
@@ -68,71 +97,85 @@ with st.sidebar:
         st.session_state.messages = []
         st.session_state.current_topic = None
         st.rerun()
+    
+    # Show API status
+    if openai.api_key:
+        st.success("✅ OpenAI API key configured")
+    else:
+        st.error("❌ OpenAI API key missing")
 
 # Function to conduct market research
-def conduct_research(topic, depth="standard"):
+def conduct_research(topic, depth="standard", region="Global", time_frame="Recent (Last 1-2 years)"):
     try:
         st.session_state.research_in_progress = True
         
         # Create system message for detailed research
         system_message = f"""You are an expert market research assistant. 
         Conduct detailed research on: {topic}.
-        Research depth: {depth}
+        
+        Research parameters:
+        - Depth: {depth}
+        - Geographic focus: {region}
+        - Time period: {time_frame}
         
         Your response should include:
-        1. Market overview
-        2. Key players and companies
-        3. Market size and growth trends
+        1. Market overview with specific focus on {region}
+        2. Key players and companies in this market
+        3. Market size and growth trends over {time_frame}
         4. Future outlook and predictions
-        5. Challenges and opportunities
+        5. Challenges and opportunities specific to {region}
+        6. Regulatory environment if relevant
         
         Format your response using markdown with clear sections and bullet points.
         Include data and statistics where relevant.
+        Be sure to frame all analysis within the {time_frame} time period.
         """
         
-        # Display thinking message
-        thinking_message = "I'm analyzing this topic and conducting research. This might take a minute..."
-        st.chat_message("assistant").write(thinking_message)
-        
-        # Use OpenAI API
-        if not openai.api_key:
-            return "Please enter your OpenAI API key in the sidebar to continue."
-        
-        # Get current timestamp for research metadata
-        timestamp = datetime.now().isoformat()
-        
-        # Call OpenAI API
-        response = openai.chat.completions.create(
-            model="gpt-4o",
-            messages=[
-                {"role": "system", "content": system_message},
-                {"role": "user", "content": f"Research this topic in detail: {topic}"}
-            ],
-            temperature=0.7,
-        )
-        
-        # Extract research result
-        research_result = response.choices[0].message.content
-        
-        # Extract sections for detailed view
-        sections = extract_sections(research_result)
-        
-        # Create final result with metadata
-        result = {
-            "content": research_result,
-            "sections": sections,
-            "metadata": {
-                "topic": topic,
-                "depth": depth,
-                "timestamp": timestamp
+        # Display thinking message with progress indicator
+        with st.spinner(f"Researching {topic} for {region} over {time_frame}... This may take up to 30 seconds for detailed analysis"):
+            # Check API key
+            if not openai.api_key:
+                return "Error: OpenAI API key is not configured. Please check the app settings."
+            
+            # Get current timestamp for research metadata
+            timestamp = datetime.now().isoformat()
+            
+            # Call OpenAI API with timeout
+            response = openai.chat.completions.create(
+                model="gpt-4o",
+                messages=[
+                    {"role": "system", "content": system_message},
+                    {"role": "user", "content": f"Research this topic in detail: {topic} in {region} over {time_frame}"}
+                ],
+                temperature=0.7,
+            )
+            
+            # Extract research result
+            research_result = response.choices[0].message.content
+            
+            # Extract sections for detailed view
+            sections = extract_sections(research_result)
+            
+            # Create final result with metadata
+            result = {
+                "content": research_result,
+                "sections": sections,
+                "metadata": {
+                    "topic": topic,
+                    "depth": depth,
+                    "region": region,
+                    "time_frame": time_frame,
+                    "timestamp": timestamp
+                }
             }
-        }
-        
-        return result
+            
+            return result
     
     except Exception as e:
         logger.error(f"Error in research: {str(e)}")
-        return f"I encountered an error while researching {topic}: {str(e)}"
+        error_message = f"I encountered an error while researching {topic}: {str(e)}"
+        st.error(error_message)  # Show error in UI
+        return error_message
     
     finally:
         st.session_state.research_in_progress = False
@@ -190,6 +233,9 @@ for i, msg in enumerate(st.session_state.messages):
             with st.expander("📊 View Detailed Research"):
                 result = msg["research_results"]
                 
+                # Display metadata
+                st.caption(f"Research focus: {result.get('metadata', {}).get('region', 'Global')} | Time period: {result.get('metadata', {}).get('time_frame', 'Recent')}")
+                
                 # Display sections
                 if "sections" in result:
                     section_titles = list(result["sections"].keys())
@@ -215,20 +261,25 @@ if prompt := st.chat_input("Ask about any market or industry..."):
     # Process the request
     if is_research_request:
         # Initial response
-        initial_response = f"I'll research '{prompt}' for you. This will take a moment..."
+        initial_response = f"I'll research '{prompt}' for {geographic_focus} over {time_period}. This will take a moment..."
         st.session_state.messages.append({"role": "assistant", "content": initial_response})
         st.rerun()
         
         # Conduct research and add results
         if len(st.session_state.messages) > 0 and st.session_state.messages[-1]["content"] == initial_response:
-            result = conduct_research(prompt, research_depth.lower())
+            result = conduct_research(
+                prompt, 
+                depth=research_depth.lower(),
+                region=geographic_focus,
+                time_frame=time_period
+            )
             
             if isinstance(result, str):
                 # Just show error message
                 st.session_state.messages[-1]["content"] = result
             else:
                 # Update with research results
-                research_response = f"Here's what I found about {prompt}:\n\n{result['content'][:500]}..."
+                research_response = f"Here's what I found about {prompt} in {geographic_focus} over {time_period}:\n\n{result['content'][:500]}..."
                 st.session_state.messages[-1]["content"] = research_response
                 st.session_state.messages[-1]["research_results"] = result
                 st.session_state.current_topic = prompt
